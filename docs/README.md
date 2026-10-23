@@ -18,7 +18,7 @@ Open http://127.0.0.1:8783/. All asset and navigation paths are relative, so the
 - Complete runnable Dart examples live in `docs/examples/`.
 - `tool/generate_docs.dart` runs the examples and records the move-replay positions using the native library. The browser only replays this data; it does not run a Dart chess engine.
 - Benchmark charts and tables read `benchmark/results/native_audit.json` at build time. The raw data and harness are included as downloads. CPU and wall-time measurements remain distinct.
-- The documentation is pinned to audited library commit `44906d82aec047b7b33cf94557047eb0cf940236`; the published 0.1.0 package predates those changes. Update the pin and performance evidence together when documenting another revision.
+- The documentation covers the `0.2.0` package. Its library code matches audited commit `44906d82aec047b7b33cf94557047eb0cf940236`, which remains pinned in source links and benchmark reproduction commands. Update the pin and performance evidence together when documenting another library revision.
 
 After changing examples or the library:
 

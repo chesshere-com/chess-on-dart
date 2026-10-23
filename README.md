@@ -36,14 +36,17 @@ Visit the **[documentation website](https://chesshere-com.github.io/chess-on-dar
 
 ## Installation
 
-For the v0.2.0 GitHub release, add the tagged source to your `pubspec.yaml` dependencies:
+Install the [pub.dev package](https://pub.dev/packages/chess_on_dart):
+
+```bash
+dart pub add chess_on_dart
+```
+
+Or add the dependency to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  chess_on_dart:
-    git:
-      url: https://github.com/chesshere-com/chess-on-dart.git
-      ref: v0.2.0
+  chess_on_dart: ^0.2.0
 ```
 
 And run:
@@ -51,7 +54,7 @@ And run:
 dart pub get
 ```
 
-The published pub.dev package is currently `0.1.0`; it predates the fixes and performance improvements in this release.
+Version `0.2.0` includes the correctness fixes and native performance improvements described in the [changelog](CHANGELOG.md).
 
 ---
 
