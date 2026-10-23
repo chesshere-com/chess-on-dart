@@ -12,6 +12,8 @@ The engine relies on native 64-bit integer arithmetic. JavaScript compilation an
 
 Developed by [ChessHere](https://www.chesshere.com/).
 
+The [documentation website source](docs/README.md) includes runnable examples, an API guide, recorded move replays, and analysis of the native benchmark results. Build it locally with `node tool/build_docs.mjs`.
+
 ---
 
 ## Features
