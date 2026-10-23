@@ -12,7 +12,7 @@ The engine relies on native 64-bit integer arithmetic. JavaScript compilation an
 
 Developed by [ChessHere](https://www.chesshere.com/).
 
-The [documentation website source](docs/README.md) includes runnable examples, an API guide, recorded move replays, and analysis of the native benchmark results. Build it locally with `node tool/build_docs.mjs`.
+Visit the **[documentation website](https://chesshere-com.github.io/chess-on-dart/)** for runnable examples, an API guide, recorded move replays, and analysis of the native benchmark results. See the [documentation source and build instructions](docs/README.md) to run it locally.
 
 ---
 
