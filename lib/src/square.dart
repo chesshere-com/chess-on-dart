@@ -16,13 +16,11 @@ extension type const Square(int value) {
 
   static Square parse(String name) {
     if (name.length != 2) return noSquare;
-    final fileChar = name[0];
-    final rankChar = name[1];
-
-    final fileIdx = _files.indexOf(fileChar);
-    final rankIdx = _ranks.indexOf(rankChar);
-
-    if (fileIdx == -1 || rankIdx == -1) return noSquare;
+    final fileIdx = name.codeUnitAt(0) - 97;
+    final rankIdx = 56 - name.codeUnitAt(1);
+    if (fileIdx < 0 || fileIdx > 7 || rankIdx < 0 || rankIdx > 7) {
+      return noSquare;
+    }
     return Square(rankIdx * 8 + fileIdx);
   }
 }

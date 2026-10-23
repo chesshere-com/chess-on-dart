@@ -71,6 +71,8 @@ extension type const Move(int value) {
         case 'n':
           promKind = typeKnight;
           break;
+        default:
+          return const Move(0);
       }
     }
     return Move.make(fromSq, toSq, promotion: promKind);

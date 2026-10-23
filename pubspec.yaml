@@ -1,5 +1,5 @@
 name: chess_on_dart
-description: A high-performance, zero-allocation bitboard chess engine in Dart. Supports standard chess, Chess960, King of the Hill, Three-Check variants, FEN/PGN import/export, and SAN/UCI move formats.
+description: A high-performance bitboard chess engine for native Dart. Supports standard chess, Chess960, King of the Hill, Three-Check variants, FEN/PGN import/export, and SAN/UCI move formats.
 version: 0.1.0
 homepage: https://github.com/chesshere-com/chess-on-dart
 repository: https://github.com/chesshere-com/chess-on-dart
