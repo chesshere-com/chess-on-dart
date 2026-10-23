@@ -2,389 +2,284 @@ import 'game.dart';
 import 'variant.dart';
 import 'piece.dart';
 
-// Extension on Game to load and export PGN
 extension GamePGN on Game {
+  /// Loads one PGN main line atomically, skipping comments, NAGs and variations.
   void loadPGN(String pgn) {
-    final tags = parsePGNTags(pgn);
-    final variantName = tags['Variant'] ?? '';
-    final variant = _pgnVariant(variantName);
-
-    var startFEN = Game.startingPositionFen;
-    if (tags['FEN'] != null) {
-      startFEN = tags['FEN']!.trim();
-    } else if (variant == Variant.threeCheck) {
-      startFEN = '${Game.startingPositionFen} +0+0';
-    }
-
-    final loaded = Game();
-    loaded.loadFEN(startFEN, variant);
-    loaded.pgnTags = tags;
-    loaded.pgnStartFEN = startFEN;
-    loaded.pgnStartTurn = loaded.turn;
-    loaded.pgnStartFullMove = loaded.fullMoves;
-
-    final fastPath = !pgn.contains('[') &&
-        !pgn.contains('{') &&
-        !pgn.contains('(') &&
-        !pgn.contains(';');
-
-    final List<String> tokens =
-        fastPath ? _fastTokenizeMoves(pgn) : _tokenizePGNMoves(pgn);
-
+    final (tags, tokens) = _scanPGN(pgn);
+    final variant = _pgnVariant(tags['Variant'] ?? '');
+    final startFEN = tags['FEN']?.trim() ?? Game.startingPositionFen;
+    final loaded = Game()..loadFEN(startFEN, variant);
+    // Recording moves may update Result; preserve the parsed headers separately.
+    loaded.pgnTags = Map<String, String>.of(tags);
     var movetextResult = '';
-    for (var tok in tokens) {
-      tok = tok.trim();
-      if (tok.isEmpty) continue;
+    for (final token in tokens) {
+      var tok = token.replaceFirst(_moveNumber, '');
+      if (tok.isEmpty || tok.startsWith(r'$')) continue;
       if (_isPGNResult(tok)) {
+        if (movetextResult.isNotEmpty) {
+          throw FormatException('Multiple PGN results');
+        }
         movetextResult = tok;
         continue;
       }
-      // Skip move numbers and NAGs
-      if (tok.contains('..') || tok.contains('.') || tok.startsWith('\$')) {
-        continue;
+      if (movetextResult.isNotEmpty) {
+        throw FormatException('Moves after PGN result');
       }
-
-      final normalizedTok = _trimSANAnnotations(tok);
-      if (normalizedTok.isEmpty) continue;
-
-      final targetSq = _getTargetSquare(normalizedTok);
-
+      tok = _trimSANAnnotations(tok);
+      if (tok.isEmpty) continue;
+      final targetSq = _getTargetSquare(tok);
       var matched = false;
-      for (final mv in loaded.legalMoves) {
-        if (targetSq != -1 && mv.to().value != targetSq) {
-          continue;
-        }
-
-        final san = _trimSANAnnotations(loaded.getMoveSanWithoutSuffix(mv));
-        if (san == normalizedTok) {
-          loaded.makeMove(mv);
+      for (final move in loaded.legalMoves) {
+        if (targetSq != -1 && move.to().value != targetSq) continue;
+        if (loaded.getMoveSanWithoutSuffix(move) == tok) {
+          if (loaded.isFinished) {
+            throw FormatException('Move after game ended: $token');
+          }
+          loaded.makeMove(move);
           matched = true;
           break;
         }
       }
-      if (!matched) {
-        throw FormatException('PGN move not found: $tok');
-      }
+      if (!matched) throw FormatException('PGN move not found: $token');
     }
-
-    final resolvedResult =
+    loaded.pgnResult =
         _resolvePGNResult(tags['Result'] ?? '', movetextResult, loaded);
-    loaded.pgnResult = resolvedResult;
     loaded.pgnTags ??= {};
-    loaded.pgnTags!['Result'] = resolvedResult;
-
-    // Apply loaded state to this game
-    whitePieces = loaded.whitePieces;
-    blackPieces = loaded.blackPieces;
-    occupied = loaded.occupied;
-    enPassant = loaded.enPassant;
-    castling = loaded.castling;
-    halfMoves = loaded.halfMoves;
-    fullMoves = loaded.fullMoves;
-    turn = loaded.turn;
-    this.variant = loaded.variant;
-    variantState = loaded.variantState;
-    zobristHash = loaded.zobristHash;
-    isCheck = loaded.isCheck;
-    isCheckmate = loaded.isCheckmate;
-    isStalemate = loaded.isStalemate;
-    isMaterialDraw = loaded.isMaterialDraw;
-    isThreefoldRepetition = loaded.isThreefoldRepetition;
-    isFiftyMoveRule = loaded.isFiftyMoveRule;
-    isSeventyFiveMoveRule = loaded.isSeventyFiveMoveRule;
-    isFinished = loaded.isFinished;
-    winner = loaded.winner;
-    status = loaded.status;
-    history = List.from(loaded.history);
-    pgnMoves = List.from(loaded.pgnMoves);
-    pgnResult = loaded.pgnResult;
-    pgnStartTurn = loaded.pgnStartTurn;
-    pgnStartFullMove = loaded.pgnStartFullMove;
-    pgnStartFEN = loaded.pgnStartFEN;
-    pgnTags = loaded.pgnTags;
-
-    whites.setAll(0, loaded.whites);
-    blacks.setAll(0, loaded.blacks);
-    squares.setAll(0, loaded.squares);
-    castlingRookFrom.setAll(0, loaded.castlingRookFrom);
-    positionHistory.clear();
-    positionHistory.addAll(loaded.positionHistory);
-    legalMoves = List.from(loaded.legalMoves);
+    loaded.pgnTags!['Result'] = loaded.pgnResult;
+    copyFrom(loaded);
   }
 
   String exportPGN() {
-    final tags = pgnTags ?? {};
+    final tags = Map<String, String>.of(pgnTags ?? {});
     final result = pgnResult;
-
-    // Fill standard tags if missing
-    final seven = [
-      'Event',
-      'Site',
-      'Date',
-      'Round',
-      'White',
-      'Black',
-      'Result'
-    ];
-    final defaults = {
+    final startFEN = pgnStartFEN.isEmpty ? toFEN() : pgnStartFEN;
+    if (variant != Variant.standard) {
+      tags['Variant'] = rulesForVariant(variant).pgnVariantTag;
+    }
+    if (startFEN != Game.startingPositionFen || variant != Variant.standard) {
+      tags['SetUp'] = '1';
+      tags['FEN'] = startFEN;
+    }
+    const defaults = {
       'Event': '?',
       'Site': '?',
       'Date': '????.??.??',
       'Round': '?',
       'White': '?',
       'Black': '?',
-      'Result': result,
     };
-    for (final key in seven) {
-      tags[key] ??= defaults[key]!;
+    for (final entry in defaults.entries) {
+      tags[entry.key] ??= entry.value;
     }
     tags['Result'] = result;
-
     final buffer = StringBuffer();
-    // Export tag headers
-    for (final key in tags.keys) {
-      buffer.write('[$key "${tags[key]}"]\n');
+    for (final entry in tags.entries) {
+      final value = entry.value.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+      buffer.writeln('[${entry.key} "$value"]');
     }
-    buffer.write('\n');
-
-    // Movetext formatting
-    final moveTextBuffer = StringBuffer();
-    var currentFullmove = pgnStartFullMove;
-    var currentTurn = pgnStartTurn;
-
+    buffer.writeln();
+    final moves = StringBuffer();
+    var fullmove = pgnStartFullMove;
+    var color = pgnStartTurn;
     for (var i = 0; i < pgnMoves.length; i++) {
-      if (currentTurn == whiteColor) {
-        moveTextBuffer.write('$currentFullmove. ${pgnMoves[i]} ');
+      if (color == whiteColor) {
+        moves.write('$fullmove. ${pgnMoves[i]} ');
       } else {
-        if (i == 0) {
-          moveTextBuffer.write('$currentFullmove... ${pgnMoves[i]} ');
-        } else {
-          moveTextBuffer.write('${pgnMoves[i]} ');
-        }
-        currentFullmove++;
+        moves
+            .write(i == 0 ? '$fullmove... ${pgnMoves[i]} ' : '${pgnMoves[i]} ');
+        fullmove++;
       }
-      currentTurn = oppositeColor(currentTurn);
+      color = oppositeColor(color);
     }
-    moveTextBuffer.write(result);
-
-    // Line wrapping at 80 chars
-    buffer.write(_wrapText(moveTextBuffer.toString(), 80));
+    moves.write(result);
+    buffer.write(_wrapText(moves.toString(), 80));
     return '${buffer.toString().trim()}\n';
   }
 }
 
-// Global PGN helper functions
-Map<String, String> parsePGNTags(String pgn) {
+final _moveNumber = RegExp(r'^\d+\.+');
+final _tagName = RegExp(r'^[A-Za-z0-9_]+$');
+
+Map<String, String> parsePGNTags(String pgn) => _scanPGN(pgn).$1;
+
+// A single linear scan keeps comment punctuation out of variation nesting and
+// handles escaped tag strings independently of their contents.
+(Map<String, String>, List<String>) _scanPGN(String pgn) {
   final tags = <String, String>{};
-  final lines = pgn.split('\n');
-  for (var line in lines) {
-    line = line.trim();
-    if (line.startsWith('[') && line.endsWith(']')) {
-      final body = line.substring(1, line.length - 1).trim();
-      final spaceIdx = body.indexOf(RegExp(r'\s'));
-      if (spaceIdx > 0) {
-        final key = body.substring(0, spaceIdx);
-        var rest = body.substring(spaceIdx).trim();
-        if (rest.startsWith('"') && rest.endsWith('"')) {
-          final val = rest
-              .substring(1, rest.length - 1)
-              .replaceAll('\\"', '"')
-              .replaceAll('\\\\', '\\');
-          tags[key] = val;
-        }
-      }
-    }
-  }
-  return tags;
-}
-
-List<String> _tokenizePGNMoves(String pgn) {
   final tokens = <String>[];
-  final buffer = StringBuffer();
-  var braceDepth = 0;
-  var parenDepth = 0;
-  var inTag = false;
-  var inLineComment = false;
+  final token = StringBuffer();
+  var braces = 0;
+  var variations = 0;
+  var lineComment = false;
   var lineStart = true;
-
   void flush() {
-    if (buffer.length > 0) {
-      tokens.add(buffer.toString());
-      buffer.clear();
+    if (token.isNotEmpty) {
+      tokens.add(token.toString());
+      token.clear();
     }
   }
 
   for (var i = 0; i < pgn.length; i++) {
     final c = pgn[i];
-    if (inLineComment) {
-      if (c == '\n') {
-        inLineComment = false;
+    if (lineComment) {
+      if (c == '\n' || c == '\r') {
+        lineComment = false;
         lineStart = true;
       }
       continue;
     }
-    if (c == '\n') {
-      lineStart = true;
-      inTag = false;
-      flush();
+    if (braces > 0) {
+      if (c == '{') braces++;
+      if (c == '}') braces--;
       continue;
     }
-    if (lineStart) {
-      if (c == ' ' || c == '\t' || c == '\r') {
-        continue;
+    if (c == '{') {
+      flush();
+      braces++;
+      continue;
+    }
+    if (c == ';' || (c == '%' && lineStart)) {
+      flush();
+      lineComment = true;
+      continue;
+    }
+    if (c == '\n' || c == '\r' || c == ' ' || c == '\t' || c == '\uFEFF') {
+      flush();
+      if (c == '\n' || c == '\r') lineStart = true;
+      continue;
+    }
+    lineStart = false;
+    if (c == '(') {
+      flush();
+      variations++;
+      continue;
+    }
+    if (c == ')') {
+      if (variations == 0) throw FormatException('Unmatched PGN variation');
+      variations--;
+      continue;
+    }
+    if (variations > 0) continue;
+    if (c == '}' || c == ']') throw FormatException('Unmatched PGN delimiter');
+    if (c == '[') {
+      flush();
+      i++;
+      while (i < pgn.length && pgn.codeUnitAt(i) <= 32) {
+        i++;
       }
-      inTag = c == '[';
-      lineStart = false;
-    }
-
-    if (inTag) continue;
-
-    switch (c) {
-      case ';':
-        inLineComment = true;
-        flush();
-        continue;
-      case '{':
-        braceDepth++;
-        flush();
-        continue;
-      case '}':
-        if (braceDepth > 0) braceDepth--;
-        flush();
-        continue;
-      case '(':
-        parenDepth++;
-        flush();
-        continue;
-      case ')':
-        if (parenDepth > 0) parenDepth--;
-        flush();
-        continue;
-    }
-
-    if (braceDepth > 0 || parenDepth > 0) continue;
-
-    if (c == ' ' || c == '\t' || c == '\r') {
-      flush();
+      final start = i;
+      while (i < pgn.length && pgn.codeUnitAt(i) > 32 && pgn[i] != '"') {
+        i++;
+      }
+      final key = pgn.substring(start, i);
+      while (i < pgn.length && pgn.codeUnitAt(i) <= 32) {
+        i++;
+      }
+      if (!_tagName.hasMatch(key) || i >= pgn.length || pgn[i] != '"') {
+        throw FormatException('Invalid PGN tag');
+      }
+      final value = StringBuffer();
+      var closed = false;
+      while (++i < pgn.length) {
+        final ch = pgn[i];
+        if (ch == '"') {
+          closed = true;
+          break;
+        }
+        if (ch == '\\') {
+          if (++i >= pgn.length || (pgn[i] != '"' && pgn[i] != '\\')) {
+            throw FormatException('Invalid PGN tag escape');
+          }
+          value.write(pgn[i]);
+        } else {
+          if (ch == '\n' || ch == '\r') {
+            throw FormatException('Newline in PGN tag');
+          }
+          value.write(ch);
+        }
+      }
+      if (!closed) throw FormatException('Unterminated PGN tag');
+      i++;
+      while (i < pgn.length && pgn.codeUnitAt(i) <= 32) {
+        i++;
+      }
+      if (i >= pgn.length || pgn[i] != ']') {
+        throw FormatException('Unterminated PGN tag');
+      }
+      if (tags.containsKey(key)) {
+        throw FormatException('Duplicate PGN tag: $key');
+      }
+      tags[key] = value.toString();
       continue;
     }
-
-    buffer.write(c);
+    token.write(c);
+  }
+  if (braces != 0 || variations != 0) {
+    throw FormatException('Unterminated PGN comment or variation');
   }
   flush();
-  return tokens;
+  return (tags, tokens);
 }
 
-List<String> _fastTokenizeMoves(String pgn) {
-  final tokens = <String>[];
-  var start = -1;
-  for (var i = 0; i <= pgn.length; i++) {
-    final charCode = i < pgn.length ? pgn.codeUnitAt(i) : 32;
-    if (i == pgn.length ||
-        charCode == 32 ||
-        charCode == 9 ||
-        charCode == 10 ||
-        charCode == 13) {
-      if (start >= 0) {
-        tokens.add(pgn.substring(start, i));
-        start = -1;
-      }
-      continue;
-    }
-    if (start == -1) {
-      start = i;
-    }
-  }
-  return tokens;
-}
-
-bool _isPGNResult(String tok) {
-  return tok == '1-0' || tok == '0-1' || tok == '1/2-1/2' || tok == '*';
-}
+bool _isPGNResult(String tok) =>
+    tok == '1-0' || tok == '0-1' || tok == '1/2-1/2' || tok == '*';
 
 String _trimSANAnnotations(String san) {
-  final dollarIdx = san.indexOf('\$');
-  var s = dollarIdx >= 0 ? san.substring(0, dollarIdx) : san;
-
-  // Trim trailing check/mate +!?
-  s = s.trim();
-  while (s.isNotEmpty &&
-      (s.endsWith('+') ||
-          s.endsWith('#') ||
-          s.endsWith('!') ||
-          s.endsWith('?'))) {
+  final dollar = san.indexOf(r'$');
+  var s = (dollar < 0 ? san : san.substring(0, dollar)).trim();
+  while (s.isNotEmpty && '+#!?'.contains(s[s.length - 1])) {
     s = s.substring(0, s.length - 1);
   }
-
-  // Remove leading numbers (e.g. "12.Nf3" => "Nf3")
-  var startIdx = 0;
-  while (startIdx < s.length) {
-    final charCode = s.codeUnitAt(startIdx);
-    if ((charCode >= 48 && charCode <= 57) || charCode == 46) {
-      // digit or dot
-      startIdx++;
-    } else {
-      break;
-    }
-  }
-  return s.substring(startIdx);
+  return s.replaceAll('0', 'O');
 }
 
 int _getTargetSquare(String san) {
-  for (var i = san.length - 1; i >= 0; i--) {
-    final code = san.codeUnitAt(i);
-    if (code >= 49 && code <= 56) {
-      // '1' - '8'
-      if (i > 0) {
-        final fCode = san.codeUnitAt(i - 1);
-        if (fCode >= 97 && fCode <= 104) {
-          // 'a' - 'h'
-          final file = fCode - 97;
-          final rank = 56 - code; // '8' is 0, '1' is 7
-          return rank * 8 + file;
-        }
-      }
-    }
+  for (var i = san.length - 1; i > 0; i--) {
+    final rank = 56 - san.codeUnitAt(i);
+    final file = san.codeUnitAt(i - 1) - 97;
+    if (rank >= 0 && rank < 8 && file >= 0 && file < 8) return rank * 8 + file;
   }
   return -1;
 }
 
 Variant _pgnVariant(String tag) {
+  if (tag.isEmpty) return Variant.standard;
   final norm = tag.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-  for (final v in Variant.values) {
-    final rules = rulesForVariant(v);
-    for (final name in rules.pgnNames) {
-      final nameNorm = name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-      if (nameNorm == norm) return v;
+  for (final variant in Variant.values) {
+    for (final name in rulesForVariant(variant).pgnNames) {
+      if (name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '') == norm) {
+        return variant;
+      }
     }
   }
-  return Variant.standard;
+  throw FormatException('Unsupported PGN variant: $tag');
 }
 
-String _resolvePGNResult(String tagRes, String movetextRes, Game g) {
-  final tag = tagRes.trim();
-  final move = movetextRes.trim();
-  final inferred = _inferPGNResult(g);
-
+String _resolvePGNResult(String tag, String move, Game game) {
+  if (tag.isNotEmpty && !_isPGNResult(tag)) {
+    throw FormatException('Invalid PGN result');
+  }
+  if (tag.isNotEmpty &&
+      tag != '*' &&
+      move.isNotEmpty &&
+      move != '*' &&
+      tag != move) {
+    throw FormatException('Conflicting PGN results');
+  }
   if (tag.isNotEmpty && tag != '*') return tag;
   if (move.isNotEmpty && move != '*') return move;
-  return inferred;
-}
-
-String _inferPGNResult(Game g) {
-  if (!g.isFinished) return '*';
-  if (g.winner == whiteColor) return '1-0';
-  if (g.winner == blackColor) return '0-1';
+  if (!game.isFinished) return '*';
+  if (game.winner == whiteColor) return '1-0';
+  if (game.winner == blackColor) return '0-1';
   return '1/2-1/2';
 }
 
 String _wrapText(String text, int width) {
   final buffer = StringBuffer();
-  final words = text.split(RegExp(r'\s+'));
   var lineLength = 0;
-  for (final word in words) {
+  for (final word in text.split(RegExp(r'\s+'))) {
     if (word.isEmpty) continue;
-    if (lineLength + word.length + (lineLength > 0 ? 1 : 0) > width) {
+    if (lineLength > 0 && lineLength + word.length + 1 > width) {
       buffer.write('\n');
       lineLength = 0;
     }

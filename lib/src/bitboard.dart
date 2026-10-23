@@ -10,7 +10,8 @@ extension type const Bitboard(int value) {
   Bitboard operator ~() => Bitboard(~value);
   Bitboard operator <<(int shift) =>
       Bitboard((value << shift) & 0xFFFFFFFFFFFFFFFF);
-  Bitboard operator >>(int shift) => Bitboard(value >> shift);
+  // Bitboards are unsigned even though native Dart integers are signed.
+  Bitboard operator >>(int shift) => Bitboard(value >>> shift);
 
   // Unsigned right shift
   Bitboard unsignedRightShift(int shift) => Bitboard(value >>> shift);

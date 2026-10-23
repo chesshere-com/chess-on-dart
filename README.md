@@ -4,9 +4,11 @@
 [![Dart CI](https://github.com/chesshere-com/chess-on-dart/actions/workflows/dart.yml/badge.svg)](https://github.com/chesshere-com/chess-on-dart/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A ultra-high-performance, zero-allocation **bitboard chess rules engine** written in pure Dart. It supports standard chess, Fischer Random (Chess960), and popular variants like King of the Hill and Three-Check.
+A high-performance **bitboard chess rules engine** written in pure Dart for native Dart and Flutter applications. It supports standard chess, Fischer Random (Chess960), and popular variants like King of the Hill and Three-Check.
 
-Perfect for building chess applications, analysis boards, and bots in Dart or Flutter.
+Build chess applications, analysis boards, and bots on the Dart VM or native AOT runtime.
+
+The engine relies on native 64-bit integer arithmetic. JavaScript compilation and Flutter web are not supported; WebAssembly has not been validated.
 
 Developed by [ChessHere](https://www.chesshere.com/).
 
@@ -15,7 +17,7 @@ Developed by [ChessHere](https://www.chesshere.com/).
 ## Features
 
 - **⚡ High Performance**: Powered by optimized 64-bit integer Bitboards, precomputed attack masks, and Magic Bitboards for sliding pieces.
-- **🚫 Zero Runtime Allocations**: Designed to prevent garbage collection overhead by avoiding object allocations in critical move-generation and evaluation loops.
+- **Reusable Search Buffers**: Legal-move and pin-analysis buffers are reused, castling geometry is cached, and undo restores parent moves without regenerating them. Move values are packed integers; undo records and public import/export APIs still allocate.
 - **♟️ Standard & Chess960**: Complete validation of legal chess moves, en-passant, promotions, and castling rights (supporting standard castling as well as Chess960 double-move castling).
 - **🏆 Chess Variants Supported**:
   - **Standard Chess**
@@ -24,7 +26,7 @@ Developed by [ChessHere](https://www.chesshere.com/).
   - **Three-Check**: Win by checking the opponent's king three times.
 - **📄 Import & Export**:
   - Full **FEN** (Forsythe-Edwards Notation) import/export.
-  - Full **PGN** (Portable Game Notation) tagging, tokenizing, loading, and exporting.
+  - **PGN** main-line import/export with escaped tags, compact move numbers, comments, NAGs, and skipped variations.
   - Full **SAN** (Standard Algebraic Notation) and **UCI** (Universal Chess Interface) move parsing.
 - **🔍 State Detection**: Checkmate, stalemate, draw by insufficient material, threefold repetition, 50-move rule, and 75-move rule.
 
@@ -90,10 +92,8 @@ void main() {
 
   // --- Three-Check ---
   final tcGame = Game();
-  tcGame.loadFEN('4k3/8/8/8/8/8/8/3Q3K w - - 0 1', Variant.threeCheck);
-  // Give White 2 checks already
-  tcGame.variantState = VariantState(checksGiven: [2, 0]);
-  tcGame.generateLegalMoves();
+  // The final field records checks already given by White and Black.
+  tcGame.loadFEN('4k3/8/8/8/8/8/8/3Q3K w - - 0 1 +2+0', Variant.threeCheck);
 
   // Play Qd1-e2+ giving the 3rd check
   tcGame.tryMove(Move.parseUCI('d1e2'));
@@ -121,19 +121,47 @@ void main() {
 ```
 
 ### 4. Move Representation
-To keep the engine allocation-free, `Move` is implemented as a Dart **extension type** wrapping a 32-bit integer. It encodes:
+To avoid allocating a separate object for every move, `Move` is a Dart **extension type** wrapping a packed integer. It encodes:
 - Source square (6 bits)
 - Target square (6 bits)
-- Promotion piece kind (3 bits)
-- Captured piece kind (3 bits)
-- Special flags: en-passant (1 bit), castling (1 bit), promotion flag (1 bit)
+- Promotion piece kind (3 bits; zero means no promotion)
+- Captured piece kind (4 bits)
+- Special flags: en-passant (1 bit), castling (1 bit)
 
 ```dart
 final move = Move.make(Square.parse('e2'), Square.parse('e4'));
-print(move.from().name); // e2
-print(move.to().name);   // e4
+print(move.from().coords()); // e2
+print(move.to().coords());   // e4
 print(move.isCastling()); // false
 ```
+
+### 5. Validated game moves and search
+
+Use `tryMove` or `makeMove` for recorded game moves. Both resolve coordinate requests to legal moves and reject moves after a terminal board status. Invalid FEN/PGN imports throw `FormatException` and leave the game unchanged. FEN validation checks structure, counters, king counts, pawn ranks, castling pieces, en-passant geometry, and the non-moving king's safety; it does not prove that a position is historically reachable.
+
+`makeMoveFast` requires a move from the current `legalMoves`. It updates the board, Zobrist hash, check flag, and child moves while skipping PGN, repetition counts, and terminal-status refresh. Pair it with `undoMoveFast`, and pair recorded moves with `undoMove`. Undo verifies that the requested move matches the most recent move.
+
+```dart
+int perft(Game game, int depth) {
+  if (depth == 0) return 1;
+  if (depth == 1) return game.legalMoves.length;
+  final moves = game.legalMoves; // Preserved while visiting child positions.
+  var nodes = 0;
+  for (final move in moves) {
+    game.makeMoveFast(move);
+    try {
+      nodes += perft(game, depth - 1);
+    } finally {
+      game.undoMoveFast(move);
+    }
+  }
+  return nodes;
+}
+```
+
+Treat board arrays and `legalMoves` as read-only during play/search. Move buffers are reused at each depth; copy a list when retaining it beyond a make/undo traversal. Prefer `loadFEN` to editing board fields, since direct edits do not automatically synchronize hashes, history, and status.
+
+Chess960 generated castling moves retain the king-to-destination encoding. Pass the generated move (including its castling flag) to distinguish it from an ordinary king move with the same coordinates. Coordinate requests also accept UCI_Chess960 king-to-rook notation.
 
 ---
 
@@ -148,15 +176,26 @@ dart analyze
 ```
 
 ### 2. Running Tests
-Run the entire test suite (including unit tests, PGN/FEN parsing tests, variant tests, and validation perft tests):
+Run the full suite, including canonical perft counts, transactional import regressions, random make/undo invariants, 332 independent oracle positions, all 960 initial layouts, and exhaustive sliding-attack table checks:
 ```bash
 dart test
 ```
 
 ### 3. Benchmarks
-Execute the Perft (Performance Test) move generation benchmark to measure node search performance on the Dart VM:
+The benchmark verifies node counts, warms each workload twice, and reports the median of five runs. It covers the starting position, Kiwipete, and a rook endgame. Run it on the VM or compile it for native AOT:
 ```bash
 dart run benchmark/perft_benchmark.dart
+dart compile exe benchmark/perft_benchmark.dart -o /tmp/chess-perft
+/tmp/chess-perft --json
+```
+
+The audit comparison uses the same benchmark harness for both revisions, including the same move-list snapshots. On macOS ARM64 with Dart 3.13.4, three alternating AOT runs used about **60% less user CPU time** after the changes (about **2.5×** the throughput per CPU second). This measures these fixed workloads on one machine, not a guarantee for every application. Raw results and methodology are in `benchmark/results/native_audit.json`.
+
+Oracle fixtures were generated with python-chess 1.11.2 (the `python-chess==1.999` distribution). Normal Dart tests require no Python dependency. To regenerate them:
+
+```bash
+python3 -m pip install python-chess==1.999
+python3 tool/generate_oracle.py
 ```
 
 ---

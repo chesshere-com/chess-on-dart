@@ -1,0 +1,378 @@
+{
+  "date": "2026-10-23",
+  "platform": "Darwin arm64",
+  "baseline_commit": "99be52fde941322e1278e61981674ba7f7119596",
+  "comparison": "Unmodified baseline library versus audited working tree; identical benchmark/perft_benchmark.dart harness compiled with Dart 3.13.4 AOT. Both keep the same caller-side move-list copies.",
+  "method": "Three alternating process runs per build. Each process performs 2 warmups and 5 measured traversals for each of 3 fixed positions. User CPU seconds measured with resource.getrusage(RUSAGE_CHILDREN), including setup and warmups. Stopwatch timings are also retained; wall times are noisy on this shared machine.",
+  "median_baseline_cpu_seconds": 5.816491,
+  "median_improved_cpu_seconds": 2.365329,
+  "cpu_speedup": 2.459062143152179,
+  "cpu_reduction_percent": 59.3340899177872,
+  "runs": [
+    {
+      "build": "baseline",
+      "run": 1,
+      "user_cpu_seconds": 5.816491,
+      "system_cpu_seconds": 0.16092099999999998,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 457823,
+            "nodes_per_second": 10627708,
+            "samples_us": [
+              428765,
+              456194,
+              457823,
+              461886,
+              462120
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 407989,
+            "nodes_per_second": 10014003,
+            "samples_us": [
+              375322,
+              387092,
+              407989,
+              462212,
+              486765
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 90397,
+            "nodes_per_second": 7462903,
+            "samples_us": [
+              86720,
+              89998,
+              90397,
+              93506,
+              96594
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "build": "improved",
+      "run": 1,
+      "user_cpu_seconds": 2.365329,
+      "system_cpu_seconds": 0.045587000000000016,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 180958,
+            "nodes_per_second": 26888057,
+            "samples_us": [
+              172283,
+              172856,
+              180958,
+              184191,
+              190970
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 145608,
+            "nodes_per_second": 28058918,
+            "samples_us": [
+              142764,
+              143367,
+              145608,
+              146920,
+              151511
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 37408,
+            "nodes_per_second": 18034217,
+            "samples_us": [
+              36420,
+              37184,
+              37408,
+              37759,
+              39499
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "build": "improved",
+      "run": 2,
+      "user_cpu_seconds": 2.4610959999999995,
+      "system_cpu_seconds": 0.04705200000000001,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 231984,
+            "nodes_per_second": 20973899,
+            "samples_us": [
+              204668,
+              231674,
+              231984,
+              246086,
+              253262
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 157984,
+            "nodes_per_second": 25860866,
+            "samples_us": [
+              148706,
+              155514,
+              157984,
+              162325,
+              180724
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 37828,
+            "nodes_per_second": 17833985,
+            "samples_us": [
+              37537,
+              37810,
+              37828,
+              40329,
+              40867
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "build": "baseline",
+      "run": 2,
+      "user_cpu_seconds": 5.828144999999999,
+      "system_cpu_seconds": 0.14612799999999998,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 491309,
+            "nodes_per_second": 9903358,
+            "samples_us": [
+              424791,
+              480495,
+              491309,
+              533904,
+              645679
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 401223,
+            "nodes_per_second": 10182873,
+            "samples_us": [
+              375557,
+              378662,
+              401223,
+              465879,
+              555003
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 83531,
+            "nodes_per_second": 8076331,
+            "samples_us": [
+              79574,
+              80073,
+              83531,
+              85353,
+              86398
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "build": "baseline",
+      "run": 3,
+      "user_cpu_seconds": 5.761356000000003,
+      "system_cpu_seconds": 0.13649300000000003,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 482866,
+            "nodes_per_second": 10076520,
+            "samples_us": [
+              448666,
+              462911,
+              482866,
+              508542,
+              602198
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 406596,
+            "nodes_per_second": 10048311,
+            "samples_us": [
+              367645,
+              375300,
+              406596,
+              447527,
+              477584
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 79514,
+            "nodes_per_second": 8484342,
+            "samples_us": [
+              73933,
+              77679,
+              79514,
+              82910,
+              95299
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "build": "improved",
+      "run": 3,
+      "user_cpu_seconds": 2.341265,
+      "system_cpu_seconds": 0.06103499999999995,
+      "benchmark": {
+        "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+        "results": [
+          {
+            "position": "Starting position",
+            "depth": 5,
+            "nodes": 4865609,
+            "median_us": 231101,
+            "nodes_per_second": 21054037,
+            "samples_us": [
+              181284,
+              214095,
+              231101,
+              240693,
+              253352
+            ]
+          },
+          {
+            "position": "Kiwipete",
+            "depth": 4,
+            "nodes": 4085603,
+            "median_us": 185026,
+            "nodes_per_second": 22081237,
+            "samples_us": [
+              158778,
+              164575,
+              185026,
+              188067,
+              213785
+            ]
+          },
+          {
+            "position": "Rook endgame",
+            "depth": 5,
+            "nodes": 674624,
+            "median_us": 38802,
+            "nodes_per_second": 17386320,
+            "samples_us": [
+              34495,
+              36088,
+              38802,
+              41128,
+              41761
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "final_working_tree_validation": {
+    "dart": "3.13.4 (stable) (Tue Sep 15 01:01:15 2026 -0700) on \"macos_arm64\"",
+    "results": [
+      {
+        "position": "Starting position",
+        "depth": 5,
+        "nodes": 4865609,
+        "median_us": 167518,
+        "nodes_per_second": 29045291,
+        "samples_us": [
+          165882,
+          167515,
+          167518,
+          172171,
+          178315
+        ]
+      },
+      {
+        "position": "Kiwipete",
+        "depth": 4,
+        "nodes": 4085603,
+        "median_us": 134702,
+        "nodes_per_second": 30330678,
+        "samples_us": [
+          132102,
+          134495,
+          134702,
+          135884,
+          136523
+        ]
+      },
+      {
+        "position": "Rook endgame",
+        "depth": 5,
+        "nodes": 674624,
+        "median_us": 35524,
+        "nodes_per_second": 18990654,
+        "samples_us": [
+          35197,
+          35201,
+          35524,
+          36779,
+          37627
+        ]
+      }
+    ]
+  }
+}

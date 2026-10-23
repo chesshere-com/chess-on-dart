@@ -80,6 +80,6 @@ void initZobrist() {
 }
 
 int zobristPieceIndex(Piece p) {
-  if (p.value >= 24) return -1;
+  if (p.value < 0 || p.value >= 24) return -1;
   return zobristPieceIndexTable[p.value];
 }

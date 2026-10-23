@@ -90,7 +90,13 @@ class Game {
   VariantState variantState = VariantState(checksGiven: [0, 0]);
 
   final List<Square> castlingRookFrom = List.filled(16, Square.noSquare);
+
+  /// Current legal moves. Treat this list as read-only; copy it to retain a
+  /// snapshot across arbitrary board edits. Search buffers are reused per ply.
   List<Move> legalMoves = [];
+  final List<List<Move>> _moveBuffers = [];
+  final LegalMoveInfo _moveInfo = LegalMoveInfo();
+  final List<CastlingSpec?> _castlingSpecs = List.filled(16, null);
 
   final Map<int, int> positionHistory = {};
   int zobristHash = 0;
@@ -120,7 +126,13 @@ class Game {
     initMasks();
     initSlidingAttacks();
     initZobrist();
-    loadFEN(startingPositionFen);
+    _loadFEN(startingPositionFen);
+  }
+
+  Game._empty() {
+    initMasks();
+    initSlidingAttacks();
+    initZobrist();
   }
 
   static const String startingPositionFen =
@@ -143,7 +155,9 @@ class Game {
     variant = Variant.standard;
     variantState = VariantState(checksGiven: [0, 0]);
     castlingRookFrom.fillRange(0, 16, Square.noSquare);
-    legalMoves.clear();
+    legalMoves = [];
+    _moveBuffers.clear();
+    _castlingSpecs.fillRange(0, 16, null);
     positionHistory.clear();
     zobristHash = 0;
     isCheck = false;
@@ -166,6 +180,17 @@ class Game {
   }
 
   void addPiece(Piece piece, Square square) {
+    if (!square.isValid) {
+      throw RangeError.range(square.value, 0, 63, 'square');
+    }
+    if (piece != Piece.empty &&
+        (piece.value != (piece.color() | piece.kind()) ||
+            piece.kind() < typePawn ||
+            piece.kind() > typeKing ||
+            (piece.color() != whiteColor && piece.color() != blackColor))) {
+      throw ArgumentError.value(piece.value, 'piece');
+    }
+    if (squares[square.value] != Piece.empty) clearSquare(square);
     squares[square.value] = piece;
     if (piece == Piece.empty) return;
     final bit = Bitboard(1 << square.value);
@@ -213,7 +238,11 @@ class Game {
       }
     }
 
-    h ^= zobristCastling[castling & 0x0F];
+    return h ^ _positionStateHash();
+  }
+
+  int _positionStateHash() {
+    var h = zobristCastling[castling & 0x0F];
 
     if (variant != Variant.standard && variant.index < zobristVariant.length) {
       h ^= zobristVariant[variant.index];
@@ -223,7 +252,7 @@ class Game {
       h ^= zobristVariantState[extraHook(this) & 0xFF];
     }
     if (variant != Variant.standard) {
-      for (final right in [castleWks, castleWqs, castleBks, castleBqs]) {
+      for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
         if ((castling & right) == 0) continue;
         final rookFrom = castlingRookFrom[right];
         if (rookFrom.isValid) {
@@ -232,7 +261,7 @@ class Game {
       }
     }
 
-    if (enPassant != Square.noSquare && hasAdjacentPawnForEnPassant()) {
+    if (enPassant != Square.noSquare && hasLegalEnPassant()) {
       h ^= zobristEnPassant[enPassant.file()];
     }
 
@@ -277,6 +306,23 @@ class Game {
     }
   }
 
+  /// Whether an en-passant capture is actually legal, including king safety.
+  bool hasLegalEnPassant() {
+    if (!enPassant.isValid || squares[enPassant.value] != Piece.empty) {
+      return false;
+    }
+    if (!hasAdjacentPawnForEnPassant()) return false;
+    final pawns = turn == whiteColor ? whites[typePawn] : blacks[typePawn];
+    var candidates = pawnAttackersTo(enPassant, turn, pawns);
+    final captured = Square(enPassant.value + (turn == whiteColor ? 8 : -8));
+    while (candidates.isNotEmpty) {
+      final from = Square(candidates.lsbIndex());
+      candidates = Bitboard(candidates.value & (candidates.value - 1));
+      if (canEnPassantMove(from, enPassant, captured)) return true;
+    }
+    return false;
+  }
+
   void recordPosition() {
     zobristHash = computeZobrist();
     positionHistory[zobristHash] = (positionHistory[zobristHash] ?? 0) + 1;
@@ -307,10 +353,31 @@ class Game {
   }
 
   // FEN loading and exporting
+  /// Loads a validated position. A failure leaves this game unchanged.
   void loadFEN(String fen, [Variant v = Variant.standard]) {
+    final loaded = Game._empty().._loadFEN(fen, v);
+    copyFrom(loaded);
+  }
+
+  void _loadFEN(String fen, [Variant v = Variant.standard]) {
     final parts = fen.trim().split(RegExp(r'\s+'));
-    if (parts.length < 6) {
-      throw FormatException('Invalid FEN: expected 6 fields');
+    if (parts.length != 6 && !(v == Variant.threeCheck && parts.length == 7)) {
+      throw FormatException(
+          'Invalid FEN: expected 6 fields (7 for three-check)');
+    }
+    if (parts[1] != 'w' && parts[1] != 'b') {
+      throw FormatException('Invalid FEN active color');
+    }
+    final clockPattern = RegExp(r'^[0-9]+$');
+    final half = int.tryParse(parts[4]);
+    final full = int.tryParse(parts[5]);
+    if (!clockPattern.hasMatch(parts[4]) ||
+        half == null ||
+        half < 0 ||
+        !clockPattern.hasMatch(parts[5]) ||
+        full == null ||
+        full < 1) {
+      throw FormatException('Invalid FEN move counters');
     }
 
     reset();
@@ -341,6 +408,9 @@ class Game {
           if (piece == Piece.empty || f >= 8) {
             throw FormatException('Invalid piece $char in FEN');
           }
+          if (piece.kind() == typePawn && (r == 0 || r == 7)) {
+            throw FormatException('Pawns cannot occupy the first or last rank');
+          }
           final sq = Square(r * 8 + f);
           addPiece(piece, sq);
           if (piece == wKing) whiteKings++;
@@ -363,6 +433,16 @@ class Game {
 
     // Castling
     _parseFENOrShredderCastling(parts[2]);
+    for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
+      if ((castling & right) == 0) continue;
+      final spec = castlingSpec(right);
+      if (spec == null ||
+          squares[spec.kingFrom.value] != spec.kingPiece ||
+          squares[spec.rookFrom.value] != spec.rookPiece) {
+        throw FormatException(
+            'Castling rights require a king and rook on their starting squares');
+      }
+    }
 
     // En passant
     final epPart = parts[3];
@@ -370,16 +450,24 @@ class Game {
       enPassant = Square.noSquare;
     } else {
       enPassant = Square.parse(epPart);
-      if (!enPassant.isValid) {
+      final expectedRank = turn == whiteColor ? 2 : 5;
+      if (!enPassant.isValid || enPassant.rank() != expectedRank) {
         throw FormatException('Invalid en-passant square $epPart');
+      }
+      final offset = turn == whiteColor ? 8 : -8;
+      final pawn = turn == whiteColor ? bPawn : wPawn;
+      if (squares[enPassant.value] != Piece.empty ||
+          squares[enPassant.value + offset] != pawn ||
+          squares[enPassant.value - offset] != Piece.empty) {
+        throw FormatException('Invalid en-passant position');
       }
     }
 
     // Halfmove clock
-    halfMoves = int.parse(parts[4]);
+    halfMoves = half;
 
     // Fullmove number
-    fullMoves = int.parse(parts[5]);
+    fullMoves = full;
 
     // Variant extra state
     if (variant == Variant.threeCheck && parts.length >= 7) {
@@ -395,6 +483,9 @@ class Game {
     recordPosition();
     generateLegalMoves();
     refreshStatus();
+    pgnStartFEN = toFEN();
+    pgnStartTurn = turn;
+    pgnStartFullMove = fullMoves;
   }
 
   String toFEN() {
@@ -447,16 +538,17 @@ class Game {
     castling = 0;
     if (field == '-') return;
 
-    final seenChars = List.filled(256, false);
+    final seenChars = <int>{};
     for (var i = 0; i < field.length; i++) {
       final char = field[i];
       final code = field.codeUnitAt(i);
-      if (seenChars[code]) {
+      if (!seenChars.add(code)) {
         throw FormatException('Duplicate castling rights');
       }
-      seenChars[code] = true;
-
       final (right, rookFrom) = _parseFENCastlingRight(char);
+      if ((castling & right) != 0) {
+        throw FormatException('Duplicate castling side');
+      }
       castling |= right;
       castlingRookFrom[right] = rookFrom;
     }
@@ -577,7 +669,7 @@ class Game {
     }
 
     final out = <String>[];
-    for (final right in [castleWks, castleWqs, castleBks, castleBqs]) {
+    for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
       if ((castling & right) == 0) continue;
       final rookFrom = castlingRookFrom[right];
       if (!rookFrom.isValid) continue;
@@ -619,11 +711,14 @@ class Game {
 
   // Legal Move generation
   void generateLegalMoves() {
-    isCheck = computeIsCheck();
-    final info = buildLegalMoveInfo();
-
-    // Reset legalMoves array
-    legalMoves.clear();
+    final depth = history.length;
+    while (_moveBuffers.length <= depth) {
+      _moveBuffers.add(<Move>[]);
+    }
+    legalMoves = _moveBuffers[depth]..clear();
+    final info = _fillLegalMoveInfo(_moveInfo);
+    isCheck = info.checkerCount != 0;
+    if (_variantHasEnded) return;
 
     final ours = turn == whiteColor ? whites : blacks;
     final oursAll = turn == whiteColor ? whitePieces : blackPieces;
@@ -661,8 +756,24 @@ class Game {
     }
   }
 
-  LegalMoveInfo buildLegalMoveInfo() {
-    final info = LegalMoveInfo();
+  bool get _variantHasEnded =>
+      (variant == Variant.threeCheck &&
+          (variantState.checksGiven[0] >= 3 ||
+              variantState.checksGiven[1] >= 3)) ||
+      (variant == Variant.kingOfTheHill &&
+          ((whites[typeKing].value | blacks[typeKing].value) &
+                  kingOfTheHillCenter) !=
+              0);
+
+  LegalMoveInfo buildLegalMoveInfo() => _fillLegalMoveInfo(LegalMoveInfo());
+
+  LegalMoveInfo _fillLegalMoveInfo(LegalMoveInfo info) {
+    info.king = Square.noSquare;
+    info.checkers = Bitboard.zero;
+    info.checkerCount = 0;
+    info.checkMask = const Bitboard(-1);
+    info.pinCount = 0;
+    info.pinned = Bitboard.zero;
     Bitboard kingBB = turn == whiteColor ? whites[typeKing] : blacks[typeKing];
     final opponent = turn == whiteColor ? blackColor : whiteColor;
     if (kingBB.isEmpty) return info;
@@ -1096,7 +1207,11 @@ class Game {
   }
 
   List<Move> _appendLegalEnPassantMoves(List<Move> dst, Bitboard pawns) {
-    if (enPassant == Square.noSquare) return dst;
+    if (!enPassant.isValid ||
+        squares[enPassant.value] != Piece.empty ||
+        enPassant.rank() != (turn == whiteColor ? 2 : 5)) {
+      return dst;
+    }
     final to = enPassant;
     if (turn == whiteColor) {
       if (to.file() > 0) {
@@ -1123,13 +1238,13 @@ class Game {
 
   List<Move> _appendLegalEnPassantFrom(
       List<Move> dst, Bitboard pawns, Square from, Square to, Square captured) {
-    if (from.value > 63 ||
-        captured.value > 63 ||
+    if (!from.isValid ||
+        !captured.isValid ||
         (pawns.value & (1 << from.value)) == 0) {
       return dst;
     }
     final capturedPiece = squares[captured.value];
-    if (capturedPiece == Piece.empty) return dst;
+    if (capturedPiece != (turn == whiteColor ? bPawn : wPawn)) return dst;
     if (canEnPassantMove(from, to, captured)) {
       dst.add(Move.make(from, to,
           capturedKind: capturedPiece.kind(), enPassant: true));
@@ -1147,12 +1262,9 @@ class Game {
     final capturedBBNeg = ~Bitboard(1 << captured.value);
     final occupiedAfter = (occupied & fromBBNeg & capturedBBNeg) | toBB;
 
-    final List<Bitboard> pieces =
-        List.from(opponent == whiteColor ? whites : blacks);
-    pieces[typePawn] &= capturedBBNeg;
-
-    return !isSquareAttackedByPieces(
-        Square(kingBB.lsbIndex()), opponent, occupiedAfter, pieces);
+    final pieces = opponent == whiteColor ? whites : blacks;
+    return !isSquareAttackedByPieces(Square(kingBB.lsbIndex()), opponent,
+        occupiedAfter, pieces, pieces[typePawn] & capturedBBNeg);
   }
 
   List<Move> _appendLegalJumpMoves(
@@ -1242,10 +1354,12 @@ class Game {
 
   List<Move> _appendLegalCastlingMoves(List<Move> dst, LegalMoveInfo info) {
     if (castling == 0) return dst;
-    for (final right in [castleWks, castleWqs, castleBks, castleBqs]) {
+    for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
+      if ((castling & right) == 0 || castlingRightColor(right) != turn) {
+        continue;
+      }
       final spec = castlingSpec(right);
       if (spec == null) continue;
-      if (spec.color != turn || (castling & spec.right) == 0) continue;
       if (squares[spec.kingFrom.value] != spec.kingPiece ||
           squares[spec.rookFrom.value] != spec.rookPiece) {
         continue;
@@ -1256,7 +1370,7 @@ class Game {
       // Create the move representing castling: from = king's start, to = king's end
       final castlingMove =
           Move.make(spec.kingFrom, spec.kingTo, castling: true);
-      if (canKingMoveWithInfo(castlingMove, info)) {
+      if (castlingKingPathIsSafe(spec, oppositeColor(turn))) {
         dst.add(castlingMove);
       }
     }
@@ -1302,14 +1416,16 @@ class Game {
   }
 
   bool isSquareAttackedByPieces(
-      Square square, int attacker, Bitboard occupied, List<Bitboard> pieces) {
+      Square square, int attacker, Bitboard occupied, List<Bitboard> pieces,
+      [Bitboard? pawns]) {
     if ((knightAttacksFrom[square.value] & pieces[typeKnight]).isNotEmpty) {
       return true;
     }
     if ((kingAttacksFrom[square.value] & pieces[typeKing]).isNotEmpty) {
       return true;
     }
-    if (pawnAttackersTo(square, attacker, pieces[typePawn]).isNotEmpty) {
+    if (pawnAttackersTo(square, attacker, pawns ?? pieces[typePawn])
+        .isNotEmpty) {
       return true;
     }
     if ((rookAttacks(square, occupied) & (pieces[typeRook] | pieces[typeQueen]))
@@ -1372,7 +1488,13 @@ class Game {
       if (!kingFrom.isValid || !rookFrom.isValid) return null;
     }
 
-    final spec = CastlingSpec(
+    final cached = _castlingSpecs[right];
+    if (cached != null &&
+        cached.kingFrom == kingFrom &&
+        cached.rookFrom == rookFrom) {
+      return cached;
+    }
+    return _castlingSpecs[right] = CastlingSpec(
       color: color,
       right: right,
       kingFrom: kingFrom,
@@ -1381,21 +1503,10 @@ class Game {
       rookTo: rookTo,
       kingPiece: color == whiteColor ? wKing : bKing,
       rookPiece: color == whiteColor ? wRook : bRook,
-      emptyMask: Bitboard.zero, // filled below
+      emptyMask: (castlingBetweenInclusiveMask(kingFrom, kingTo) |
+              castlingBetweenInclusiveMask(rookFrom, rookTo)) &
+          ~Bitboard((1 << kingFrom.value) | (1 << rookFrom.value)),
       safeSquares: castlingKingPathMask(kingFrom, kingTo),
-    );
-
-    return CastlingSpec(
-      color: spec.color,
-      right: spec.right,
-      kingFrom: spec.kingFrom,
-      kingTo: spec.kingTo,
-      rookFrom: spec.rookFrom,
-      rookTo: spec.rookTo,
-      kingPiece: spec.kingPiece,
-      rookPiece: spec.rookPiece,
-      emptyMask: castlingEmptyMask(spec),
-      safeSquares: spec.safeSquares,
     );
   }
 
@@ -1439,7 +1550,7 @@ class Game {
 
   CastlingSpec? castlingSpecForMove(Move m) {
     if (!m.isCastling()) return null;
-    for (final right in [castleWks, castleWqs, castleBks, castleBqs]) {
+    for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
       final spec = castlingSpec(right);
       if (spec == null) continue;
       if (spec.kingFrom == m.from() && spec.kingTo == m.to()) {
@@ -1503,24 +1614,25 @@ class Game {
   }
 
   bool castlingKingPathIsSafe(CastlingSpec spec, int opponent) {
-    var squares = spec.safeSquares;
-    while (squares.isNotEmpty) {
-      final square = Square(squares.lsbIndex());
-      squares = Bitboard(squares.value & (squares.value - 1));
-      var occupiedAfter = occupied;
-      occupiedAfter &= ~Bitboard(1 << spec.kingFrom.value);
-      occupiedAfter &= ~Bitboard(1 << spec.rookFrom.value);
-      occupiedAfter |= Bitboard(1 << square.value);
-      occupiedAfter |= Bitboard(1 << spec.rookTo.value);
-      if (isSquareAttackedByWithOccupied(square, opponent, occupiedAfter)) {
+    // The rook remains on its origin while checking the king's transit path.
+    // Only the final-square test uses the completed castling occupancy.
+    var path = spec.safeSquares & ~Bitboard(1 << spec.kingTo.value);
+    final withoutKing = occupied & ~Bitboard(1 << spec.kingFrom.value);
+    while (path.isNotEmpty) {
+      final square = Square(path.lsbIndex());
+      path = Bitboard(path.value & (path.value - 1));
+      if (isSquareAttackedByWithOccupied(square, opponent, withoutKing)) {
         return false;
       }
     }
-    return true;
+    final finalOccupied = (withoutKing & ~Bitboard(1 << spec.rookFrom.value)) |
+        Bitboard(1 << spec.rookTo.value);
+    return !isSquareAttackedByWithOccupied(
+        spec.kingTo, opponent, finalOccupied);
   }
 
   void clearCastlingRightsForRookSquare(Square square) {
-    for (final right in [castleWks, castleWqs, castleBks, castleBqs]) {
+    for (final right in const [castleWks, castleWqs, castleBks, castleBqs]) {
       if (castlingRookFrom[right] == square) {
         castling &= ~right;
       }
@@ -1528,40 +1640,70 @@ class Game {
   }
 
   // Move making
+  /// Validates a coordinate or fully encoded move before playing it.
   void tryMove(Move m) {
     generateLegalMoves();
+    refreshStatus();
+    makeMove(m);
+  }
+
+  Move _resolveLegalMove(Move requested) {
     for (final legal in legalMoves) {
-      if (_moveMatchesRequest(legal, m)) {
-        makeMove(legal);
-        return;
-      }
+      if (legal == requested) return legal;
     }
-    throw FormatException('Illegal move: ${m.uci()}');
+    for (final legal in legalMoves) {
+      if (_moveMatchesRequest(legal, requested)) return legal;
+    }
+    throw FormatException('Illegal move: ${requested.uci()}');
   }
 
   bool _moveMatchesRequest(Move legal, Move requested) {
-    if (legal.from() != requested.from() || legal.to() != requested.to()) {
+    if (requested.isCastling() && !legal.isCastling()) return false;
+    if (requested.isEnPassant() && !legal.isEnPassant()) return false;
+    if (legal.from() != requested.from() ||
+        legal.promotionTo() != requested.promotionTo()) {
       return false;
     }
-    if (legal.isPromotion() || requested.isPromotion()) {
-      return legal.promotionTo() == requested.promotionTo();
+    if (legal.to() == requested.to()) return true;
+    // UCI_Chess960 represents castling as king-to-rook. Keep accepting the
+    // package's king-to-destination encoding as well.
+    if (variant == Variant.chess960 && legal.isCastling()) {
+      final color = legal.from().rank() == 7 ? whiteColor : blackColor;
+      final right = castlingRightForMoveDestination(color, legal.to());
+      return right != 0 && requested.to() == castlingRookFrom[right];
     }
-    return true;
+    return false;
   }
 
+  /// Plays a legal move, recording SAN, repetition history and game status.
   void makeMove(Move m) {
-    _recordPGNMove(m);
-    _makeMoveInternal(m, true, true);
+    if (isFinished) throw StateError('The game has finished');
+    final legal = _resolveLegalMove(m);
+    _makeMoveInternal(legal, true, true);
+    if (isFinished) {
+      pgnResult = winner == whiteColor
+          ? '1-0'
+          : winner == blackColor
+              ? '0-1'
+              : '1/2-1/2';
+      pgnTags?['Result'] = pgnResult;
+    }
   }
 
+  /// Search API: [m] must come from [legalMoves]. Updates the board, hash,
+  /// check flag and child moves, but skips PGN, repetition counts and status.
+  /// Pair with [undoMoveFast]; do not edit board fields during a search.
   void makeMoveFast(Move m) {
     _makeMoveInternal(m, false, true);
   }
 
   void _makeMoveInternal(
       Move m, bool updatePositionHistory, bool generateLegal) {
-    // Capture state for UndoMove
-    var captured = squares[m.to().value];
+    // Public board/variant fields can be edited before a real game move.
+    if (updatePositionHistory) zobristHash = computeZobrist();
+    final movingPiece = squares[m.from().value];
+    final kind = movingPiece.kind();
+    var captured = m.isCastling() ? Piece.empty : squares[m.to().value];
     if (m.isEnPassant()) {
       if (turn == whiteColor) {
         captured = squares[m.to().value + 8];
@@ -1570,16 +1712,58 @@ class Game {
       }
     }
 
-    history.add(GameState(
+    final state = GameState(
       capturedPiece: captured,
       castling: castling,
-      castlingRookFrom: List.from(castlingRookFrom),
-      variantState: variantState.clone(),
+      castlingRookFrom: updatePositionHistory
+          ? List<Square>.of(castlingRookFrom)
+          : castlingRookFrom,
+      variantState: updatePositionHistory ? variantState.clone() : variantState,
       enPassant: enPassant,
       halfMoves: halfMoves,
       fullMoves: fullMoves,
       zobristHash: zobristHash,
-    ));
+      move: m,
+      legalMoves: legalMoves,
+      isCheck: isCheck,
+      recordsPosition: updatePositionHistory,
+      pgnState: updatePositionHistory
+          ? PgnState(
+              tags: pgnTags,
+              result: pgnResult,
+              startTurn: pgnStartTurn,
+              startFullMove: pgnStartFullMove,
+              startFEN: pgnStartFEN,
+            )
+          : null,
+    );
+    if (updatePositionHistory) _recordPGNMove(m);
+    history.add(state);
+
+    // Incremental hashing also keeps the fast search API's keys current.
+    zobristHash ^= _positionStateHash();
+    if (m.isCastling()) {
+      final spec = castlingSpecForMove(m)!;
+      final kingKeys = zobristPiece[zobristPieceIndex(spec.kingPiece)];
+      final rookKeys = zobristPiece[zobristPieceIndex(spec.rookPiece)];
+      zobristHash ^= kingKeys[spec.kingFrom.value] ^
+          kingKeys[spec.kingTo.value] ^
+          rookKeys[spec.rookFrom.value] ^
+          rookKeys[spec.rookTo.value];
+    } else {
+      final promoted =
+          m.isPromotion() ? Piece(m.promotionTo() | turn) : movingPiece;
+      zobristHash ^= zobristPiece[zobristPieceIndex(movingPiece)]
+              [m.from().value] ^
+          zobristPiece[zobristPieceIndex(promoted)][m.to().value];
+      if (captured != Piece.empty) {
+        final capturedSquare = m.isEnPassant()
+            ? m.to().value + (turn == whiteColor ? 8 : -8)
+            : m.to().value;
+        zobristHash ^=
+            zobristPiece[zobristPieceIndex(captured)][capturedSquare];
+      }
+    }
 
     if (captured != Piece.empty || squares[m.from().value].kind() == typePawn) {
       halfMoves = 0;
@@ -1593,7 +1777,6 @@ class Game {
 
     justMove(m);
 
-    final kind = squares[m.to().value].kind();
     if (kind == typeKing) {
       if (turn == whiteColor) {
         castling &= ~(castleWks | castleWqs);
@@ -1626,11 +1809,15 @@ class Game {
     // Call variant hook
     final afterMoveHook = rulesForVariant(variant).afterMove;
     if (afterMoveHook != null) {
+      // A speculative SAN/search move must not mutate a caller's reference to
+      // the parent variant state. Undo can then restore that exact object.
+      variantState = variantState.clone();
       afterMoveHook(this, m, history.last);
     }
 
+    zobristHash ^= _positionStateHash();
     if (updatePositionHistory) {
-      recordPosition();
+      positionHistory[zobristHash] = (positionHistory[zobristHash] ?? 0) + 1;
     }
 
     if (generateLegal) {
@@ -1710,12 +1897,11 @@ class Game {
   }
 
   void undoMove(Move m) {
-    if (pgnMoves.isNotEmpty) {
-      pgnMoves.removeLast();
-    }
     _undoMoveInternal(m, true, true);
   }
 
+  /// Restores the parent board, hash, check flag and move buffer without
+  /// regenerating moves. Matches the most recent [makeMoveFast].
   void undoMoveFast(Move m) {
     _undoMoveInternal(m, false, true);
   }
@@ -1723,32 +1909,54 @@ class Game {
   void _undoMoveInternal(
       Move m, bool updatePositionHistory, bool generateLegal) {
     if (history.isEmpty) return;
-
+    final state = history.last;
+    final played = state.move ?? m;
+    if (!_moveMatchesRequest(played, m)) {
+      throw ArgumentError('Undo must match the most recently played move');
+    }
+    if (state.recordsPosition != updatePositionHistory) {
+      throw StateError('Match makeMove/undoMove or makeMoveFast/undoMoveFast');
+    }
     if (updatePositionHistory) {
-      positionHistory[zobristHash] = (positionHistory[zobristHash] ?? 0) - 1;
-      if ((positionHistory[zobristHash] ?? 0) <= 0) {
+      final count = (positionHistory[zobristHash] ?? 0) - 1;
+      if (count <= 0) {
         positionHistory.remove(zobristHash);
+      } else {
+        positionHistory[zobristHash] = count;
+      }
+      if (pgnMoves.isNotEmpty) pgnMoves.removeLast();
+      final pgn = state.pgnState;
+      if (pgn != null) {
+        pgnResult = pgn.result;
+        pgnTags = pgn.tags;
+        pgnStartTurn = pgn.startTurn;
+        pgnStartFullMove = pgn.startFullMove;
+        pgnStartFEN = pgn.startFEN;
+      } else {
+        pgnResult = '*';
+        pgnTags?.remove('Result');
       }
     }
-
-    final state = history.removeLast();
+    history.removeLast();
     castling = state.castling;
-    castlingRookFrom.setAll(0, state.castlingRookFrom);
+    if (!identical(castlingRookFrom, state.castlingRookFrom)) {
+      castlingRookFrom.setAll(0, state.castlingRookFrom);
+    }
     variantState = state.variantState;
     enPassant = state.enPassant;
     halfMoves = state.halfMoves;
     fullMoves = state.fullMoves;
     zobristHash = state.zobristHash;
-
     turn = oppositeColor(turn);
-
-    unmakeMove(m, state.capturedPiece);
-
+    unmakeMove(played, state.capturedPiece);
     if (generateLegal) {
-      generateLegalMoves();
-      if (updatePositionHistory) {
-        refreshStatus();
+      if (state.legalMoves != null) {
+        legalMoves = state.legalMoves!;
+        isCheck = state.isCheck;
+      } else {
+        generateLegalMoves();
       }
+      if (updatePositionHistory) refreshStatus();
     }
   }
 
@@ -1827,6 +2035,10 @@ class Game {
 
   // Insufficient Material
   bool hasInsufficientMaterial() {
+    if (variant == Variant.kingOfTheHill) return false;
+    if (variant == Variant.threeCheck) {
+      return (occupied & ~(whites[typeKing] | blacks[typeKing])).isEmpty;
+    }
     if (whites[typeQueen].isNotEmpty ||
         whites[typeRook].isNotEmpty ||
         whites[typePawn].isNotEmpty) {
@@ -1853,14 +2065,8 @@ class Game {
       return _allBishopsOnSameColor(whites[typeBishop] | blacks[typeBishop]);
     }
 
-    if (whites[typeKnight].countOnes() > 1) {
-      return false;
-    }
-    if (blacks[typeKnight].countOnes() > 1) {
-      return false;
-    }
-
-    return true;
+    // A knight on each side can participate in a mating position.
+    return (whites[typeKnight] | blacks[typeKnight]).countOnes() <= 1;
   }
 
   bool _allBishopsOnSameColor(Bitboard bishops) {
@@ -1871,14 +2077,15 @@ class Game {
 
   void refreshStatus() {
     final comp = ComputedStatus();
-    comp.isCheckmate = isCheck && legalMoves.isEmpty;
+    final variantEnded = _variantHasEnded;
+    comp.isCheckmate = !variantEnded && isCheck && legalMoves.isEmpty;
     comp.isMaterialDraw = hasInsufficientMaterial();
     comp.isThreefoldRepetition = checkThreefoldRepetition();
     comp.isFiftyMoveRule = checkFiftyMoveRule();
     comp.isSeventyFiveMoveRule = checkSeventyFiveMoveRule();
     comp.winner = noColor;
     comp.status = GameStatus.ongoing;
-    comp.isStalemate = !comp.isCheckmate && legalMoves.isEmpty;
+    comp.isStalemate = !variantEnded && !isCheck && legalMoves.isEmpty;
 
     if (comp.isCheckmate) {
       comp.status = GameStatus.checkmate;
@@ -1917,6 +2124,67 @@ class Game {
     status = comp.status;
   }
 
+  /// Replaces this game with an independent deep copy of [g].
+  void copyFrom(Game g) {
+    if (identical(this, g)) return;
+    _moveBuffers.clear();
+    _castlingSpecs.fillRange(0, 16, null);
+    whitePieces = g.whitePieces;
+    blackPieces = g.blackPieces;
+    occupied = g.occupied;
+    enPassant = g.enPassant;
+    castling = g.castling;
+    halfMoves = g.halfMoves;
+    fullMoves = g.fullMoves;
+    turn = g.turn;
+    variant = g.variant;
+    variantState = g.variantState.clone();
+    zobristHash = g.zobristHash;
+    isCheck = g.isCheck;
+    isCheckmate = g.isCheckmate;
+    isStalemate = g.isStalemate;
+    isMaterialDraw = g.isMaterialDraw;
+    isThreefoldRepetition = g.isThreefoldRepetition;
+    isFiftyMoveRule = g.isFiftyMoveRule;
+    isSeventyFiveMoveRule = g.isSeventyFiveMoveRule;
+    isFinished = g.isFinished;
+    winner = g.winner;
+    status = g.status;
+    history = g.history
+        .map((state) => GameState(
+              capturedPiece: state.capturedPiece,
+              castling: state.castling,
+              castlingRookFrom: List<Square>.of(state.castlingRookFrom),
+              variantState: state.variantState.clone(),
+              enPassant: state.enPassant,
+              halfMoves: state.halfMoves,
+              fullMoves: state.fullMoves,
+              zobristHash: state.zobristHash,
+              move: state.move,
+              legalMoves: state.legalMoves == null
+                  ? null
+                  : List<Move>.of(state.legalMoves!),
+              isCheck: state.isCheck,
+              recordsPosition: state.recordsPosition,
+              pgnState: state.pgnState?.clone(),
+            ))
+        .toList();
+    pgnMoves = List.from(g.pgnMoves);
+    pgnResult = g.pgnResult;
+    pgnStartTurn = g.pgnStartTurn;
+    pgnStartFullMove = g.pgnStartFullMove;
+    pgnStartFEN = g.pgnStartFEN;
+    pgnTags = g.pgnTags != null ? Map.from(g.pgnTags!) : null;
+
+    whites.setAll(0, g.whites);
+    blacks.setAll(0, g.blacks);
+    squares.setAll(0, g.squares);
+    castlingRookFrom.setAll(0, g.castlingRookFrom);
+    positionHistory.clear();
+    positionHistory.addAll(g.positionHistory);
+    legalMoves = List.from(g.legalMoves);
+  }
+
   // PGN hooks
   void _recordPGNMove(Move m) {
     if (pgnMoves.isEmpty) {
@@ -1924,7 +2192,7 @@ class Game {
       pgnStartFullMove = fullMoves;
       pgnStartFEN = toFEN();
       final tag = rulesForVariant(variant).pgnVariantTag;
-      if (tag.isNotEmpty) {
+      if (variant != Variant.standard || pgnStartFEN != startingPositionFen) {
         pgnTags ??= {};
         pgnTags!['Variant'] = tag;
         pgnTags!['SetUp'] = '1';
@@ -1936,17 +2204,17 @@ class Game {
     pgnTags?.remove('Result');
   }
 
+  /// Formats a legal move without cloning the board or modifying game history.
   String getMoveSAN(Move m) {
-    final base = getMoveSanWithoutSuffix(m);
-    final clone = cloneGame(this);
-    clone.makeMoveFast(m);
-    final isMate = clone.isCheck && clone.legalMoves.isEmpty;
-    if (isMate) {
-      return '$base#';
-    } else if (clone.isCheck) {
-      return '$base+';
+    final legal = _resolveLegalMove(m);
+    final base = getMoveSanWithoutSuffix(legal);
+    _makeMoveInternal(legal, false, true);
+    try {
+      if (_variantHasEnded || (isCheck && legalMoves.isEmpty)) return '$base#';
+      return isCheck ? '$base+' : base;
+    } finally {
+      _undoMoveInternal(legal, false, true);
     }
-    return base;
   }
 
   String getMoveSanWithoutSuffix(Move m) {
@@ -2010,7 +2278,7 @@ class Game {
     var sameRank = 0;
 
     for (final legal in legalMoves) {
-      if (legal.value == m.value) {
+      if (legal.from() == from || legal.isCastling()) {
         continue;
       }
       if (legal.to() != to || squares[legal.from().value].kind() != kind) {
@@ -2075,46 +2343,7 @@ bool castlingRightIsKingside(int right) {
   return (squareOnBackRank(color, 2), squareOnBackRank(color, 3));
 }
 
-Game cloneGame(Game g) {
-  final clone = Game();
-  clone.whitePieces = g.whitePieces;
-  clone.blackPieces = g.blackPieces;
-  clone.occupied = g.occupied;
-  clone.enPassant = g.enPassant;
-  clone.castling = g.castling;
-  clone.halfMoves = g.halfMoves;
-  clone.fullMoves = g.fullMoves;
-  clone.turn = g.turn;
-  clone.variant = g.variant;
-  clone.variantState = g.variantState.clone();
-  clone.zobristHash = g.zobristHash;
-  clone.isCheck = g.isCheck;
-  clone.isCheckmate = g.isCheckmate;
-  clone.isStalemate = g.isStalemate;
-  clone.isMaterialDraw = g.isMaterialDraw;
-  clone.isThreefoldRepetition = g.isThreefoldRepetition;
-  clone.isFiftyMoveRule = g.isFiftyMoveRule;
-  clone.isSeventyFiveMoveRule = g.isSeventyFiveMoveRule;
-  clone.isFinished = g.isFinished;
-  clone.winner = g.winner;
-  clone.status = g.status;
-  clone.history = List.from(g.history);
-  clone.pgnMoves = List.from(g.pgnMoves);
-  clone.pgnResult = g.pgnResult;
-  clone.pgnStartTurn = g.pgnStartTurn;
-  clone.pgnStartFullMove = g.pgnStartFullMove;
-  clone.pgnStartFEN = g.pgnStartFEN;
-  clone.pgnTags = g.pgnTags != null ? Map.from(g.pgnTags!) : null;
-
-  clone.whites.setAll(0, g.whites);
-  clone.blacks.setAll(0, g.blacks);
-  clone.squares.setAll(0, g.squares);
-  clone.castlingRookFrom.setAll(0, g.castlingRookFrom);
-  clone.positionHistory.addAll(g.positionHistory);
-  clone.legalMoves = List.from(g.legalMoves);
-
-  return clone;
-}
+Game cloneGame(Game g) => Game._empty()..copyFrom(g);
 
 int sign(int v) => v < 0 ? -1 : (v > 0 ? 1 : 0);
 
