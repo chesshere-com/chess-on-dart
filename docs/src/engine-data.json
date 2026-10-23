@@ -1,0 +1,294 @@
+{
+  "examples": {
+    "quickstart": {
+      "source": "import 'package:chess_on_dart/chess_on_dart.dart';\n\nvoid main() {\n  final game = Game();\n  print('Legal moves: ${game.legalMoves.length}');\n\n  final move = Move.parseUCI('e2e4');\n  print('SAN: ${game.getMoveSAN(move)}');\n  game.tryMove(move);\n  print(game.toFEN());\n\n  game.undoMove(move);\n  print('Back at start: ${game.toFEN() == Game.startingPositionFen}');\n}\n",
+      "output": "Legal moves: 20\nSAN: e4\nrnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1\nBack at start: true"
+    },
+    "notation": {
+      "source": "import 'package:chess_on_dart/chess_on_dart.dart';\n\nvoid main() {\n  final game = Game();\n  // Loading a PGN replaces the game; it does not append moves.\n  game.loadPGN('1.e4 e5 2.Nf3 Nc6 3.Bb5 a6');\n  print(game.exportPGN());\n\n  final before = game.toFEN();\n  try {\n    game.loadFEN('not a position');\n  } on FormatException {\n    print('Invalid FEN left the game unchanged: ${game.toFEN() == before}');\n  }\n\n  final copy = cloneGame(game);\n  copy.tryMove(Move.parseUCI('b5a4'));\n  print('Original unchanged: ${game.toFEN() == before}');\n}\n",
+      "output": "[Result \"*\"]\n[Event \"?\"]\n[Site \"?\"]\n[Date \"????.??.??\"]\n[Round \"?\"]\n[White \"?\"]\n[Black \"?\"]\n\n1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 *\n\nInvalid FEN left the game unchanged: true\nOriginal unchanged: true"
+    },
+    "variants": {
+      "source": "import 'package:chess_on_dart/chess_on_dart.dart';\n\nvoid main() {\n  final chess960 = Game()..loadFEN(chess960StartingFEN(0), Variant.chess960);\n  print('Chess960 #0: ${chess960.toFEN()}');\n\n  final hill = Game()\n    ..loadFEN('k7/8/8/8/8/3K4/8/8 w - - 0 1', Variant.kingOfTheHill);\n  hill.tryMove(Move.parseUCI('d3d4'));\n  print('King of the Hill: ${hill.status.name}');\n\n  final checks = Game()\n    ..loadFEN('4k3/8/8/8/8/8/8/3Q3K w - - 0 1 +2+0', Variant.threeCheck);\n  checks.tryMove(Move.parseUCI('d1e2'));\n  print('Three-Check: ${checks.variantState.checksGiven[0]} checks, '\n      '${checks.status.name}');\n}\n",
+      "output": "Chess960 #0: bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1\nKing of the Hill: variantWin\nThree-Check: 3 checks, variantWin"
+    },
+    "search": {
+      "source": "import 'package:chess_on_dart/chess_on_dart.dart';\n\nint perft(Game game, int depth) {\n  if (depth == 0) return 1;\n  if (depth == 1) return game.legalMoves.length;\n  final moves = game.legalMoves;\n  var nodes = 0;\n  for (final move in moves) {\n    game.makeMoveFast(move);\n    try {\n      nodes += perft(game, depth - 1);\n    } finally {\n      game.undoMoveFast(move);\n    }\n  }\n  return nodes;\n}\n\nvoid main() {\n  final game = Game();\n  print('Depth 3: ${perft(game, 3)} nodes');\n  print('Position restored: ${game.toFEN() == Game.startingPositionFen}');\n}\n",
+      "output": "Depth 3: 8902 nodes\nPosition restored: true"
+    }
+  },
+  "demos": [
+    {
+      "id": "opening",
+      "title": "Ruy Lopez",
+      "variant": "standard",
+      "frames": [
+        {
+          "fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 20,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+          "san": "e4",
+          "uci": "e2e4",
+          "turn": "Black",
+          "legalMoves": 20,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2",
+          "san": "e5",
+          "uci": "e7e5",
+          "turn": "White",
+          "legalMoves": 29,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+          "san": "Nf3",
+          "uci": "g1f3",
+          "turn": "Black",
+          "legalMoves": 29,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+          "san": "Nc6",
+          "uci": "b8c6",
+          "turn": "White",
+          "legalMoves": 27,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3",
+          "san": "Bb5",
+          "uci": "f1b5",
+          "turn": "Black",
+          "legalMoves": 30,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4",
+          "san": "a6",
+          "uci": "a7a6",
+          "turn": "White",
+          "legalMoves": 32,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkbnr/1ppp1ppp/p1n5/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 4",
+          "san": "Ba4",
+          "uci": "b5a4",
+          "turn": "Black",
+          "legalMoves": 32,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 5",
+          "san": "Nf6",
+          "uci": "g8f6",
+          "turn": "White",
+          "legalMoves": 27,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "r1bqkb1r/1ppp1ppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 3 5",
+          "san": "O-O",
+          "uci": "e1g1",
+          "turn": "Black",
+          "legalMoves": 30,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        }
+      ]
+    },
+    {
+      "id": "chess960",
+      "title": "Chess960 · position 0",
+      "variant": "chess960",
+      "frames": [
+        {
+          "fen": "bbqnnrkr/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFhf - 0 1",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 20,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "bbqnnrkr/pppppppp/8/8/2P5/8/PP1PPPPP/BBQNNRKR b HFhf c3 0 1",
+          "san": "c4",
+          "uci": "c2c4",
+          "turn": "Black",
+          "legalMoves": 20,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "bbqnnrkr/pp1ppppp/8/2p5/2P5/8/PP1PPPPP/BBQNNRKR w HFhf c6 0 2",
+          "san": "c5",
+          "uci": "c7c5",
+          "turn": "White",
+          "legalMoves": 27,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "bbqnnrkr/pp1ppppp/8/2p5/2P5/6P1/PP1PPP1P/BBQNNRKR b HFhf - 0 2",
+          "san": "g3",
+          "uci": "g2g3",
+          "turn": "Black",
+          "legalMoves": 26,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "bbqnnrkr/pp1ppp1p/6p1/2p5/2P5/6P1/PP1PPP1P/BBQNNRKR w HFhf - 0 3",
+          "san": "g6",
+          "uci": "g7g6",
+          "turn": "White",
+          "legalMoves": 27,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        }
+      ]
+    },
+    {
+      "id": "hill",
+      "title": "King of the Hill",
+      "variant": "kingOfTheHill",
+      "frames": [
+        {
+          "fen": "k7/8/8/8/8/3K4/8/8 w - - 0 1",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 8,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "k7/8/8/8/3K4/8/8/8 b - - 1 1",
+          "san": "Kd4#",
+          "uci": "d3d4",
+          "turn": "Black",
+          "legalMoves": 0,
+          "isCheck": false,
+          "finished": true,
+          "status": "variantWin"
+        }
+      ]
+    },
+    {
+      "id": "checks",
+      "title": "Three-Check",
+      "variant": "threeCheck",
+      "frames": [
+        {
+          "fen": "4k3/8/8/8/8/8/8/3Q3K w - - 0 1 +2+0",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 23,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "4k3/8/8/8/8/8/4Q3/7K b - - 1 1 +3+0",
+          "san": "Qe2#",
+          "uci": "d1e2",
+          "turn": "Black",
+          "legalMoves": 0,
+          "isCheck": true,
+          "finished": true,
+          "status": "variantWin"
+        }
+      ]
+    },
+    {
+      "id": "en-passant",
+      "title": "En passant",
+      "variant": "standard",
+      "frames": [
+        {
+          "fen": "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 7,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "4k3/8/3P4/8/8/8/8/4K3 b - - 0 2",
+          "san": "exd6",
+          "uci": "e5d6",
+          "turn": "Black",
+          "legalMoves": 4,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        }
+      ]
+    },
+    {
+      "id": "promotion",
+      "title": "Promotion",
+      "variant": "standard",
+      "frames": [
+        {
+          "fen": "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+          "san": "Start",
+          "uci": "",
+          "turn": "White",
+          "legalMoves": 9,
+          "isCheck": false,
+          "finished": false,
+          "status": "ongoing"
+        },
+        {
+          "fen": "Q3k3/8/8/8/8/8/8/4K3 b - - 0 1",
+          "san": "a8=Q+",
+          "uci": "a7a8q",
+          "turn": "Black",
+          "legalMoves": 3,
+          "isCheck": true,
+          "finished": false,
+          "status": "check"
+        }
+      ]
+    }
+  ]
+}

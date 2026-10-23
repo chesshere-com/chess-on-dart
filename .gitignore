@@ -19,3 +19,7 @@ coverage/
 # Tooling
 .antigravitycli/
 
+# Generated documentation and private preview checkout
+docs/dist/
+.site-preview/
+
