@@ -1,7 +1,16 @@
-# Directories to ignore when publishing to pub.dev
-coverage/
-.antigravitycli/
+# Local tooling and generated state (a .pubignore replaces .gitignore for pub).
+.dart_tool/
+pubspec.lock
 .DS_Store
 .idea/
 .vscode/
-.dart_tool/
+coverage/
+.antigravitycli/
+.site-preview/
+.github/
+
+# The website is hosted separately; retain native examples and benchmarks.
+docs/
+tool/build_docs.mjs
+tool/check_docs.mjs
+tool/generate_docs.dart

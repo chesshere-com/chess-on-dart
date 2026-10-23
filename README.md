@@ -12,7 +12,7 @@ The engine relies on native 64-bit integer arithmetic. JavaScript compilation an
 
 Developed by [ChessHere](https://www.chesshere.com/).
 
-Visit the **[documentation website](https://chesshere-com.github.io/chess-on-dart/)** for runnable examples, an API guide, recorded move replays, and analysis of the native benchmark results. See the [documentation source and build instructions](docs/README.md) to run it locally.
+Visit the **[documentation website](https://chesshere-com.github.io/chess-on-dart/)** for runnable examples, an API guide, recorded move replays, and analysis of the native benchmark results. See the [documentation source and build instructions](https://github.com/chesshere-com/chess-on-dart/blob/main/docs/README.md) to run it locally.
 
 ---
 
@@ -36,17 +36,22 @@ Visit the **[documentation website](https://chesshere-com.github.io/chess-on-dar
 
 ## Installation
 
-Add `chess_on_dart` to your `pubspec.yaml` dependencies:
+For the v0.2.0 GitHub release, add the tagged source to your `pubspec.yaml` dependencies:
 
 ```yaml
 dependencies:
-  chess_on_dart: ^0.1.0
+  chess_on_dart:
+    git:
+      url: https://github.com/chesshere-com/chess-on-dart.git
+      ref: v0.2.0
 ```
 
 And run:
 ```bash
 dart pub get
 ```
+
+The published pub.dev package is currently `0.1.0`; it predates the fixes and performance improvements in this release.
 
 ---
 
