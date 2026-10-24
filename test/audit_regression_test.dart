@@ -200,4 +200,81 @@ void main() {
       }
     });
   });
+
+  group('Game-end enforcement', () {
+    const bareKings = 'k7/8/8/8/8/8/8/K7 w - - 0 1';
+    const knightShuffle = ['g1f3', 'g8f6', 'f3g1', 'f6g8'];
+    final shufflePgn = [
+      for (var i = 0; i < 5; i++) '${2 * i + 1}. Nf3 Nf6 ${2 * i + 2}. Ng1 Ng8',
+    ].join(' ');
+
+    void shuffle(Game game, int plies) {
+      for (var ply = 0; ply < plies; ply++) {
+        game.tryMove(Move.parseUCI(knightShuffle[ply % 4]));
+      }
+    }
+
+    test('finished games reject recorded moves by default', () {
+      final game = Game()..loadFEN(bareKings);
+      expect(game.status, GameStatus.drawInsufficientMaterial);
+      final before = snapshot(game);
+      expect(() => game.tryMove(Move.parseUCI('a1a2')), throwsStateError);
+      expect(snapshot(game), before);
+    });
+
+    test('the opt-out plays on after insufficient material', () {
+      final game = Game(enforceGameEnd: false)..loadFEN(bareKings);
+      game.tryMove(Move.parseUCI('a1a2'));
+      game.makeMove(Move.parseUCI('a8b8'));
+      expect(game.pgnMoves, ['Ka2', 'Kb8']);
+      expect(game.status, GameStatus.drawInsufficientMaterial);
+      expect(game.pgnResult, '1/2-1/2');
+      game.undoMove(Move.parseUCI('a8b8'));
+      expect(game.toFEN(), 'k7/8/8/8/8/8/K7/8 b - - 1 1');
+      expect(game.isFinished, isTrue);
+    });
+
+    test('the opt-out reports status for each position after fivefold', () {
+      final game = Game(enforceGameEnd: false);
+      shuffle(game, 17);
+      expect(game.status, GameStatus.drawFivefoldRepetition);
+      expect(game.pgnResult, '1/2-1/2');
+      game.tryMove(Move.parseUCI('e7e5'));
+      expect(game.isFinished, isFalse);
+      expect(game.status, GameStatus.ongoing);
+      expect(game.pgnResult, '*');
+      expect(game.pgnMoves, hasLength(18));
+    });
+
+    test('loadPGN follows the setting', () {
+      final strict = Game();
+      final before = snapshot(strict);
+      expect(() => strict.loadPGN(shufflePgn), throwsFormatException);
+      expect(snapshot(strict), before);
+
+      final lenient = Game(enforceGameEnd: false)..loadPGN(shufflePgn);
+      expect(lenient.pgnMoves, hasLength(20));
+      expect(lenient.status, GameStatus.drawFivefoldRepetition);
+      expect(lenient.pgnResult, '1/2-1/2');
+    });
+
+    test('cloneGame copies the setting; copyFrom and loadFEN keep it', () {
+      final lenient = Game(enforceGameEnd: false);
+      expect(cloneGame(lenient).enforceGameEnd, isFalse);
+      expect(cloneGame(Game()).enforceGameEnd, isTrue);
+      lenient
+        ..copyFrom(Game())
+        ..loadFEN(bareKings)
+        ..tryMove(Move.parseUCI('a1a2'));
+      expect(lenient.enforceGameEnd, isFalse);
+      expect(lenient.pgnMoves, ['Ka2']);
+    });
+
+    test('decisive endings leave no legal moves to play', () {
+      final game = Game(enforceGameEnd: false)
+        ..loadFEN('k7/8/8/8/3K4/8/8/8 w - - 0 1', Variant.kingOfTheHill);
+      expect(game.legalMoves, isEmpty);
+      expect(() => game.tryMove(Move.parseUCI('d4d3')), throwsFormatException);
+    });
+  });
 }
