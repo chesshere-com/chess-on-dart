@@ -46,7 +46,7 @@ Or add the dependency to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  chess_on_dart: ^0.2.0
+  chess_on_dart: ^0.2.1
 ```
 
 And run:
@@ -54,7 +54,7 @@ And run:
 dart pub get
 ```
 
-Version `0.2.0` includes the correctness fixes and native performance improvements described in the [changelog](CHANGELOG.md).
+Version `0.2.1` adds `Game(enforceGameEnd: false)` for applications that decide game end themselves, alongside the correctness fixes and native performance improvements from `0.2.0`. See the [changelog](CHANGELOG.md).
 
 ---
 
