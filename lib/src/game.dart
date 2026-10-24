@@ -112,6 +112,15 @@ class Game {
   int winner = noColor;
   GameStatus status = GameStatus.ongoing;
 
+  /// Whether recorded moves and PGN imports stop at a finished position.
+  ///
+  /// When false, [makeMove], [tryMove] and `loadPGN` keep playing legal moves
+  /// after an automatic draw (insufficient material, fivefold repetition, the
+  /// 75-move rule), and [isFinished] and [status] describe each new position.
+  /// Checkmate, stalemate and variant wins leave no legal moves either way.
+  /// [cloneGame] copies this setting; [copyFrom] and imports keep it.
+  final bool enforceGameEnd;
+
   List<GameState> history = [];
 
   // PGN state
@@ -122,14 +131,14 @@ class Game {
   int pgnStartFullMove = 1;
   String pgnStartFEN = '';
 
-  Game() {
+  Game({this.enforceGameEnd = true}) {
     initMasks();
     initSlidingAttacks();
     initZobrist();
     _loadFEN(startingPositionFen);
   }
 
-  Game._empty() {
+  Game._empty({this.enforceGameEnd = true}) {
     initMasks();
     initSlidingAttacks();
     initZobrist();
@@ -1676,8 +1685,11 @@ class Game {
   }
 
   /// Plays a legal move, recording SAN, repetition history and game status.
+  /// Throws [StateError] once [isFinished] unless [enforceGameEnd] is false.
   void makeMove(Move m) {
-    if (isFinished) throw StateError('The game has finished');
+    if (isFinished && enforceGameEnd) {
+      throw StateError('The game has finished');
+    }
     final legal = _resolveLegalMove(m);
     _makeMoveInternal(legal, true, true);
     if (isFinished) {
@@ -2343,7 +2355,8 @@ bool castlingRightIsKingside(int right) {
   return (squareOnBackRank(color, 2), squareOnBackRank(color, 3));
 }
 
-Game cloneGame(Game g) => Game._empty()..copyFrom(g);
+Game cloneGame(Game g) =>
+    Game._empty(enforceGameEnd: g.enforceGameEnd)..copyFrom(g);
 
 int sign(int v) => v < 0 ? -1 : (v > 0 ? 1 : 0);
 

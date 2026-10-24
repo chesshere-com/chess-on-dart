@@ -94,7 +94,7 @@ function api() {
       ['Move.make(Square from, Square to, …) → Move', 'Construct a packed move. Resolve coordinate requests with the recorded game API; do not invent flags for the fast path.'],
       ['move.uci() / move.from().coords() / move.to().coords()', 'Convert a move to UCI or read the source and destination coordinates. Square indexing is a8 = 0 through h1 = 63.'],
       ['getMoveSAN(Move move) → String', 'Format a legal move in the current position, including disambiguation, castling, promotion, check, and mate or variant-win suffixes. Call before playing the move.'],
-      ['tryMove(Move move) → void', 'Regenerate legal moves and status, validate the request, and play a recorded move. Throws FormatException for an illegal move or StateError when the game has finished.'],
+      ['tryMove(Move move) → void', 'Regenerate legal moves and status, validate the request, and play a recorded move. Throws FormatException for an illegal move or StateError when the game has finished, unless enforceGameEnd is false.'],
       ['makeMove(Move move) / undoMove(Move move) → void', 'Play a validated, recorded move or undo the most recent recorded move. Normal play maintains PGN, repetition history, and game status.'],
     ]],
     ['records','Game records',[
@@ -105,6 +105,7 @@ function api() {
       ['isCheck / isCheckmate / isStalemate → bool', 'Inspect standard board conditions. isCheck updates during fast search; terminal-status fields are refreshed by recorded game operations.'],
       ['isFinished / status', 'Inspect automatic termination and GameStatus. Outcomes include checkmate, stalemate, insufficient material, fivefold repetition, the 75-move rule, and variant wins.'],
       ['isThreefoldRepetition / isFiftyMoveRule → bool', 'Claimable draw conditions for the application to handle. These flags do not set isFinished by themselves.'],
+      ['Game({bool enforceGameEnd = true})', 'Pass false when the application decides game end itself. Recorded moves and loadPGN then continue past insufficient material, fivefold repetition, and the 75-move rule, while isFinished and status describe each position. cloneGame copies the setting.'],
     ]],
     ['traversal','Search & variants',[
       ['makeMoveFast(Move move) / undoMoveFast(Move move) → void', 'Traverse legal moves without recording PGN, repetition counts, or terminal status. Use a currently generated move, pair calls, and avoid board edits during traversal.'],

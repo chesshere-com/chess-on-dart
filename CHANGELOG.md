@@ -1,3 +1,9 @@
+## Unreleased
+
+### Added
+
+- `Game(enforceGameEnd: false)` lets recorded moves and `loadPGN` continue past automatic draws (insufficient material, fivefold repetition, the 75-move rule) for applications that decide game end themselves. `isFinished` and `status` still describe each position. The default keeps 0.2.0 behaviour.
+
 ## 0.2.0 — 2026-10-24
 
 ### Performance

@@ -8,7 +8,8 @@ extension GamePGN on Game {
     final (tags, tokens) = _scanPGN(pgn);
     final variant = _pgnVariant(tags['Variant'] ?? '');
     final startFEN = tags['FEN']?.trim() ?? Game.startingPositionFen;
-    final loaded = Game()..loadFEN(startFEN, variant);
+    final loaded = Game(enforceGameEnd: enforceGameEnd)
+      ..loadFEN(startFEN, variant);
     // Recording moves may update Result; preserve the parsed headers separately.
     loaded.pgnTags = Map<String, String>.of(tags);
     var movetextResult = '';
@@ -32,7 +33,7 @@ extension GamePGN on Game {
       for (final move in loaded.legalMoves) {
         if (targetSq != -1 && move.to().value != targetSq) continue;
         if (loaded.getMoveSanWithoutSuffix(move) == tok) {
-          if (loaded.isFinished) {
+          if (loaded.isFinished && enforceGameEnd) {
             throw FormatException('Move after game ended: $token');
           }
           loaded.makeMove(move);

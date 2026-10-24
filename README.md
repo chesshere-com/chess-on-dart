@@ -147,7 +147,7 @@ print(move.isCastling()); // false
 
 ### 5. Validated game moves and search
 
-Use `tryMove` or `makeMove` for recorded game moves. Both resolve coordinate requests to legal moves and reject moves after a terminal board status. Invalid FEN/PGN imports throw `FormatException` and leave the game unchanged. FEN validation checks structure, counters, king counts, pawn ranks, castling pieces, en-passant geometry, and the non-moving king's safety; it does not prove that a position is historically reachable.
+Use `tryMove` or `makeMove` for recorded game moves. Both resolve coordinate requests to legal moves and reject moves after a terminal board status. Construct `Game(enforceGameEnd: false)` when an application decides game end itself, such as an analysis board or a replay of moves a server accepted: recorded moves and `loadPGN` then continue past automatic draws (insufficient material, fivefold repetition, the 75-move rule) while `isFinished` and `status` still describe each position. Invalid FEN/PGN imports throw `FormatException` and leave the game unchanged. FEN validation checks structure, counters, king counts, pawn ranks, castling pieces, en-passant geometry, and the non-moving king's safety; it does not prove that a position is historically reachable.
 
 `makeMoveFast` requires a move from the current `legalMoves`. It updates the board, Zobrist hash, check flag, and child moves while skipping PGN, repetition counts, and terminal-status refresh. Pair it with `undoMoveFast`, and pair recorded moves with `undoMove`. Undo verifies that the requested move matches the most recent move.
 
